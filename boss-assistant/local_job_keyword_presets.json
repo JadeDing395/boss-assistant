@@ -1,0 +1,17 @@
+[
+  {
+    "_comment": "这是岗位关键词预置示例。当你在 Boss 创建了同名岗位（含此处 matchIncludes 的所有词）时，插件会自动用这套关键词作为初始值。你可以直接删了这个示例换成自己的；也可以按相同结构添加多个。",
+    "name": "示例岗位",
+    "matchIncludes": ["示例", "请改我"],
+    "override": {
+      "requiredKeywords": "必含关键词1\n必含关键词2",
+      "includeKeywords": "任意关键词1\n任意关键词2\n任意关键词3",
+      "excludeKeywords": "排除关键词1\n排除关键词2",
+      "keywordsAndMode": false,
+      "aiNiceKeywords": "加分项1\n加分项2",
+      "minAge": 0,
+      "maxAge": 0,
+      "minEdu": "0"
+    }
+  }
+]

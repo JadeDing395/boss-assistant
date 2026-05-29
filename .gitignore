@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python (clicker)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.python-version
+
+# Logs
+*.log
+logs/
+
+# Local config (用户本地 token / 配置不应入库)
+*.local
+.env
+.env.local
+
+# Backup
+*.bak
+*.orig
+
+# Build artifacts
+dist/
+build/
+# 默认排除所有 zip
+*.zip
+# 例外：允许发布 zip 入库，方便同事在仓库主页直接下载
+!boss-assistant-v*.zip
+
+# Publish script contains token - never commit
+_publish-to-gitlab.command
+README_发布.md
+# 注：发布 zip 包（boss-assistant-v*-macOS.zip）允许入库，
+# 这样同事在仓库主页能直接下载，不需要 GitLab Releases 功能

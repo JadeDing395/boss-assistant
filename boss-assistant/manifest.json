@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "小池的boss助手",
+  "version": "1.1.2",
+  "version_name": "1.1.2-xiaochi",
+  "description": "小池的 Boss 直聘半自动助手：低风险筛选 + 草稿生成 + 关键动作人工确认。1.1.2：三页视觉统一升级；自动回复评估后会主动点「继续沟通」打开输入框；半/全自动行为再次明确；待人工汇总卡可点击跳转 Boss 沟通页；自动回复岗位范围卡折叠化。",
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "sidePanel"],
+  "host_permissions": ["*://*.zhipin.com/*", "http://127.0.0.1/*", "http://localhost/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "小池的boss助手 1.1.2",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.zhipin.com/*"],
+      "js": ["content/dom_safe.js", "content/boss_injector.js", "content/boss_content.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/boss_interceptor.js", "local_job_keyword_presets.json"],
+      "matches": ["*://*.zhipin.com/*"]
+    }
+  ]
+}

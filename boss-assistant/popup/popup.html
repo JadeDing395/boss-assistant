@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小池的boss助手1.1.2</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="header">
+        <div class="headerRow">
+          <div class="titleWrap">
+            <div class="title">小池的boss助手<span class="verBadge">v1.1.2</span></div>
+          </div>
+          <div class="headerBtns">
+            <!-- 1.1.x：token 用量小徽章，点击打开网关后台 -->
+            <a id="tokenGauge" class="tokenGauge" href="https://console.tapsvc.com/nova/#/ai-gateway?tab=overview" target="_blank" title="点击查看完整 token 用量看板（在浏览器打开）">
+              <div class="tgRow">
+                <span class="tgLabel">Today</span>
+                <span class="tgVal" id="tgUsed">-</span>
+                <span class="tgSep">/</span>
+                <span class="tgQuota" id="tgQuota">-</span>
+                <span class="tgPct" id="tgPct"></span>
+              </div>
+              <div class="tgBar"><div id="tgBarFill" class="tgBarFill"></div></div>
+            </a>
+            <!-- 1.1.x：AI 设置按钮（点开/收起浮动配置面板）-->
+            <button id="btnToggleAi" class="btn ghost small navBtn" title="AI 配置（OpenAI 兼容）">⚙ AI 设置</button>
+            <button id="btnCloseHang" class="btn ghost small" title="关闭悬挂窗口" style="display:none;">X</button>
+            <button id="btnSave" class="btn primary small save" title="保存全部设置（含关键词与 AI 配置）">保存</button>
+            <button id="btnCollapse" class="btn ghost small">折叠</button>
+          </div>
+        </div>
+      </header>
+
+      <!-- 1.1.x：AI 配置浮动面板，默认隐藏，点击 ⚙ AI 设置 切换显示 -->
+      <section id="aiConfigPanel" class="card aiPanel" style="display:none;">
+        <div class="row">
+          <div class="aiPanelTitle">⚙ AI 配置（OpenAI 兼容）<span id="aiKeyStatus" class="aiKeyStatusInline">Key：未保存</span></div>
+          <button id="btnCloseAi" class="btn ghost small" title="关闭 AI 配置">收起</button>
+        </div>
+        <div class="grid2" style="margin-top:6px;">
+          <div>
+            <div class="label">常用网关</div>
+            <select id="aiBaseUrlPreset" class="input"></select>
+            <input id="aiBaseUrl" class="input" placeholder="baseUrl，例如：https://api.siliconflow.cn/v1" />
+          </div>
+          <div>
+            <div class="label">常用模型</div>
+            <select id="aiModelPreset" class="input"></select>
+            <input id="aiModel" class="input" placeholder="model，例如：deepseek-ai/DeepSeek-V3" />
+          </div>
+        </div>
+        <input id="aiApiKey" class="input" type="password" autocomplete="off" placeholder="apiKey（本地保存；留空 = 不修改）" />
+        <div class="row" style="margin-top:6px; flex-wrap:wrap; gap:8px;">
+          <div class="help" id="aiTestStatus" style="margin:0; flex:1; min-width:160px;">测试：未运行</div>
+          <div class="help" id="aiUsageTip" style="margin:0;">Token：-</div>
+          <button id="btnClearApiKey" class="btn ghost small">清空 Key</button>
+          <button id="btnSaveAi" class="btn primary small" title="保存并自动测试连通">保存并测试</button>
+        </div>
+      </section>
+
+      <section class="statusBar" id="statusBar" title="实时运行状态（基于本地存储数据汇总）">
+        <div class="sbItem">
+          <span class="sbLabel">状态</span>
+          <span id="sbRunState" class="sbVal">未运行</span>
+        </div>
+        <div class="sbItem" id="sbRiskModeWrap" title="点击切换：低风险（仅生成草稿，安全） ↔ 自动打招呼（=1.0.3 行为，有封号风险）">
+          <span class="sbLabel">风险</span>
+          <span id="sbRiskMode" class="sbRiskMode low">🛡 低风险</span>
+        </div>
+        <div class="sbItem">
+          <span class="sbLabel">模式</span>
+          <span id="sbMode" class="sbVal">-</span>
+        </div>
+        <div class="sbItem">
+          <span class="sbLabel">已处理</span>
+          <span id="sbProcessed" class="sbVal">0</span>
+        </div>
+        <div class="sbItem">
+          <span class="sbLabel">通过</span>
+          <span id="sbPassed" class="sbVal">0</span>
+        </div>
+        <div class="sbItem">
+          <span class="sbLabel">待人工</span>
+          <span id="sbManual" class="sbVal">0</span>
+        </div>
+        <button id="sbStopBtn" class="sbStopBtn" title="停止当前任务" style="display:none;">⏹ 停止</button>
+      </section>
+
+      <div class="tabs">
+        <button id="tabOutreach" class="tab">主动寻访</button>
+        <button id="tabReply" class="tab">自动回复</button>
+        <button id="tabHistory" class="tab">历史/统计</button>
+      </div>
+
+      <div id="pageOutreach">
+        <div class="pageIntro">
+          <span class="piDot"></span>
+          <span class="piTitle">主动寻访</span>
+          <span class="piSub">AI 评分 · 关键词命中 · 硬过滤</span>
+          <span class="piLine"></span>
+        </div>
+        <section class="card cardCompact basicCardHighlight" id="basicCard">
+          <div class="currentJobRow">
+            <span class="currentJobIcon">🎯</span>
+            <div class="currentJobField">
+              <div class="currentJobLabel">正在筛选岗位</div>
+              <select id="jobSelect" class="input currentJobSelect"></select>
+            </div>
+            <div class="currentJobThreshold">
+              <div class="currentJobLabel" title="通过分数阈值（0-100）">通过阈值</div>
+              <input id="passScore" class="input" type="number" min="0" max="100" step="1" />
+            </div>
+          </div>
+          <!-- 隐藏的 badge：保留 ID 以兼容 popup.js 里更新当前岗位的逻辑（无视觉影响）-->
+          <span id="currentJobBadge" style="display:none;"></span>
+
+          <!-- 1.1.x：评分维度与权重（可折叠） -->
+          <details class="scoringDimsCollapse" data-key="scoringDims">
+            <summary class="scoringDimsSummary">
+              <span class="scoringDimsArrow">▶</span>
+              <span class="scoringDimsTitle">评分维度与权重</span>
+              <span class="scoringDimsHint">· 点击展开查看 AI 评分逻辑 / 调整各维度权重</span>
+              <span id="scoringDimsTotal" class="scoringDimsTotal">100/100</span>
+            </summary>
+            <div class="scoringDimsBody">
+              <div class="scoringDimsBar" id="scoringDimsBar"></div>
+              <div class="row" style="margin: 6px 0 8px; justify-content:flex-end; gap:8px;">
+                <span id="scoringDimsSavedTag" class="help" style="margin:0;">已自动保存</span>
+                <button id="btnRestoreScoringDims" class="btn ghost small" title="恢复 4 维默认权重（25/25/25/25）">恢复默认</button>
+              </div>
+              <div id="scoringDimsGrid" class="scoringDimsGrid"></div>
+            </div>
+          </details>
+
+          <div class="help" style="margin-top:6px;">岗位列表为空？先去 Boss 左侧「职位管理」打开一次让页面加载。</div>
+        </section>
+
+        <section class="card" style="padding: 0;">
+          <details class="collapseSec collapseOuter" data-key="advancedRun" style="margin: 0; border: 0; background: transparent;">
+            <summary>
+              <span class="secTitle">进阶运行设置</span>
+              <span class="secHint">运行参数 / 本机点击器 / 仿人节奏</span>
+            </summary>
+            <div class="collapseBody nestedSecs">
+
+          <details class="collapseSec" data-key="runParams">
+            <summary>
+              <span class="secTitle">运行参数</span>
+              <span class="secHint">每次上限 / 随机延迟 / 频繁背压</span>
+            </summary>
+            <div class="collapseBody">
+              <div class="grid2">
+                <div>
+                  <div class="label">每次最多联系人数</div>
+                  <input id="maxPerRun" class="input" type="number" min="1" max="500" step="1" />
+                </div>
+                <div>
+                  <div class="label">随机延迟最小（ms）</div>
+                  <input id="delayMinMs" class="input" type="number" min="0" max="60000" step="100" />
+                </div>
+              </div>
+
+              <div style="margin-top: 8px;">
+                <div class="label">随机延迟最大（ms）</div>
+                <input id="delayMaxMs" class="input" type="number" min="0" max="60000" step="100" />
+              </div>
+              <div style="margin-top: 8px;">
+                <div class="label" title='Boss 弹"操作频繁"时自动暂停的秒数'>"操作频繁"后暂停（秒）</div>
+                <input id="freqBackoffSec" class="input" type="number" min="3" max="600" step="1" />
+              </div>
+            </div>
+          </details>
+
+          <details class="collapseSec" data-key="externalClicker">
+            <summary>
+              <span class="secTitle">本机点击器（OS 级真鼠标，绕开 isTrusted 检测）</span>
+              <span class="secHint" id="externalClickerHint">未连接</span>
+            </summary>
+            <div class="collapseBody">
+              <div class="label" style="margin-top: 4px;">运行模式（选一个，即时生效）</div>
+              <div class="segmented" id="runModeGroup" style="grid-template-columns: 1fr 1fr 1fr;">
+                <button id="runModeLow"  class="segBtn" type="button" data-value="low"        title="🛡 低风险：只筛人 + 生成草稿，不自动点任何按钮（最安全）">🛡 低风险</button>
+                <button id="runModeSemi" class="segBtn" type="button" data-value="semiauto"   title="⚡ 半自动：自动点'打招呼'，但每次点击前本机弹确认（你随时可 ESC 取消）">⚡ 半自动</button>
+                <button id="runModeAuto" class="segBtn" type="button" data-value="auto"       title="⚠️ 全自动：自动点 + 不弹确认（封号风险最高，仅老熟号 + 小批量）">⚠️ 全自动</button>
+              </div>
+              <div class="help" id="runModeTip" style="margin-bottom: 8px;">当前：🛡 低风险（仅生成草稿；本机点击器不被调用）</div>
+
+              <div class="row" style="margin-top: 10px;">
+                <label class="switch">
+                  <input id="externalClickerEnabled" type="checkbox" />
+                  <span>启用本机点击器（半自动 / 全自动模式下生效）</span>
+                </label>
+                <button id="btnTestClicker" class="btn ghost small" title="向本机点击器发健康检查">测试连通</button>
+              </div>
+              <div id="clickerLowRiskWarn" class="help" style="display:none; margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.35); color:#fcd34d;">
+                ⚠️ 当前是「低风险」模式，本机点击器不会被调用。要让它生效，请把上面运行模式切到「半自动」或「全自动」。
+              </div>
+              <div class="label" style="margin-top: 10px;">点击器地址</div>
+              <input id="externalClickerEndpoint" class="input" placeholder="http://127.0.0.1:12345" />
+              <div class="row" style="margin-top: 4px;">
+                <label class="switch">
+                  <input id="externalClickerPerClickConfirm" type="checkbox" />
+                  <span>每次点击前弹确认（ESC 可取消）</span>
+                </label>
+              </div>
+
+              <div class="row" id="unattendedRow" style="margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.25);">
+                <label class="switch" title="一键启用：关弹窗 + 关 idle gate + 直接保存">
+                  <input id="unattendedMode" type="checkbox" />
+                  <span style="font-weight: 700; color: #fca5a5;">🚀 一键无人值守</span>
+                </label>
+                <span class="help" style="margin: 0; flex: 1; text-align: right;">出门前勾上即跑</span>
+              </div>
+
+              <div class="grid2" style="margin-top: 10px;">
+                <div>
+                  <div class="label" title="近 N 秒没动鼠标键盘才点；防止抢用户的操作">空闲 ≥ N 秒才点</div>
+                  <input id="externalClickerIdleMinSec" class="input" type="number" min="0" max="3600" step="5" placeholder="0 = 关闭" />
+                </div>
+                <div>
+                  <div class="label" title="等空闲超时则跳过该候选人">最多等候（秒）</div>
+                  <input id="externalClickerIdleMaxWaitSec" class="input" type="number" min="30" max="3600" step="10" />
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="collapseSec" data-key="humanizer">
+            <summary>
+              <span class="secTitle">仿人节奏（Humanizer）</span>
+              <span class="secHint" id="humanizerHint">仅自动模式生效</span>
+            </summary>
+            <div class="collapseBody">
+              <div class="label" style="margin-top: 4px;">强度</div>
+              <select id="humanizerIntensity" class="input">
+                <option value="weak">弱：仅延迟抖动</option>
+                <option value="med">中：+ 阅读停顿 + 偶尔滚动</option>
+                <option value="strong">强：+ 25-40 分钟随机休息 + 5% 随机跳过</option>
+              </select>
+              <div class="grid2" style="margin-top: 8px;">
+                <div>
+                  <div class="label">休息间隔（分）·最小</div>
+                  <input id="humanizerRestEveryMinMin" class="input" type="number" min="5" max="240" step="1" />
+                </div>
+                <div>
+                  <div class="label">休息间隔（分）·最大</div>
+                  <input id="humanizerRestEveryMinMax" class="input" type="number" min="5" max="240" step="1" />
+                </div>
+              </div>
+              <div class="grid2">
+                <div>
+                  <div class="label">休息时长（秒）·最短</div>
+                  <input id="humanizerRestDurationSecMin" class="input" type="number" min="20" max="600" step="5" />
+                </div>
+                <div>
+                  <div class="label">休息时长（秒）·最长</div>
+                  <input id="humanizerRestDurationSecMax" class="input" type="number" min="20" max="600" step="5" />
+                </div>
+              </div>
+              <div>
+                <div class="label" title='打破规律性。即使 AI 判定通过也按此概率"假装漏掉"。0 = 关闭'>强度=强 时随机跳过 %（0-30）</div>
+                <input id="humanizerRandomSkipPct" class="input" type="number" min="0" max="30" step="1" />
+              </div>
+            </div>
+          </details>
+
+            </div>
+          </details>
+        </section>
+
+        <section class="card" style="padding: 0;">
+          <details class="collapseSec collapseOuter" data-key="filterRules" style="margin: 0; border: 0; background: transparent;">
+            <summary>
+              <span class="secTitle">筛选条件</span>
+              <span class="secHint">岗位要求(JD) + 关键词 + 年龄/学历硬过滤</span>
+            </summary>
+            <div class="collapseBody nestedSecs">
+
+          <details class="collapseSec" data-key="jdSection">
+            <summary>
+              <span class="secTitle">岗位要求（JD）</span>
+              <span class="secHint" id="jdSummaryHint">未填</span>
+              <button id="btnRefreshJd" class="btn ghost small" title="从职位管理页刷新该岗位的 JD（覆盖当前 JD）" style="margin-left: 8px;">刷新JD</button>
+            </summary>
+            <div class="collapseBody">
+              <textarea id="jdText" class="textarea" rows="6" placeholder="粘贴岗位要求，用于 AI 匹配"></textarea>
+            </div>
+          </details>
+
+          <details class="collapseSec" data-key="keywordRules">
+            <summary>
+              <span class="secTitle">寻访模式 · 关键词 · 年龄学历</span>
+              <span class="secHint">AI/关键词模式 + 必含/任意/排除/加分 + 硬过滤</span>
+            </summary>
+            <div class="collapseBody">
+              <!-- 模式切换 + AI 生成按钮（一行内） -->
+              <div class="row" style="gap: 6px; margin-top: 4px;">
+                <div class="segmented" id="outreachModeGroup" style="grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 0; flex: 1 1 auto;">
+                  <label class="segBtn segBtnRadio">
+                    <input id="outreachModeAI" type="radio" name="outreachMode" />
+                    <span>🤖 AI 模式</span>
+                  </label>
+                  <label class="segBtn segBtnRadio">
+                    <input id="outreachModeNoAI" type="radio" name="outreachMode" />
+                    <span>🔤 仅关键词</span>
+                  </label>
+                </div>
+                <button id="btnAiGenKeywords" class="btn primary small" title="用 AI 从 JD 自动生成必含 / 任意 / 加分 / 排除关键词（会覆盖当前内容；仅 AI 模式生效）" style="white-space: nowrap; padding: 0 12px;">✨ AI 生成</button>
+              </div>
+
+              <!-- 关键词输入区，统一紧凑排版 -->
+              <div class="label" style="margin-top: 10px;">必含（AND 全部命中）</div>
+              <textarea id="requiredKeywords" class="textarea" rows="2" placeholder="例：插画 / 二次元（用 / 或换行分隔）"></textarea>
+              <div class="label" id="includeKeywordsLabel" style="margin-top: 8px;">任意（OR 命中其一）</div>
+              <textarea id="includeKeywords" class="textarea" rows="2" placeholder="例：角色KV / 宣传图 / 海报绘制"></textarea>
+              <div id="aiOnlyBlock">
+                <div class="label" style="margin-top: 8px;">加分项（命中加分不影响通过；仅 AI 模式生效）</div>
+                <textarea id="aiNiceKeywords" class="textarea" rows="2" placeholder="例：八大美院 / 大厂经验 / 上线项目"></textarea>
+              </div>
+              <div class="label" style="margin-top: 8px;">排除（命中即淘汰）</div>
+              <textarea id="excludeKeywords" class="textarea" rows="2" placeholder="例：外包 / 销售；写&quot;职位是策划&quot;只看候选人岗位"></textarea>
+
+              <details class="kwTip">
+                <summary>📘 关键词写法 / 组合公式</summary>
+                <div class="help" style="padding-top:6px;">
+                  <b>公式</b>：(必含全 AND) AND (任意 OR 命中其一) AND NOT 排除；加分项叠加分数不影响通过。<br/>
+                  支持 <b>换行或 /</b> 分隔；AI 会按语义扩展（八大美院 = 中央美院/中国美院…；大厂 = 腾讯/网易/米哈游/B 站/完美世界…）。<br/>
+                  排除词可写完整短语指定语义角色：「职位是策划」只看候选人岗位，不看"配合策划"这类描述。
+                </div>
+              </details>
+
+              <!-- 硬过滤区 -->
+              <div class="hardFilters">
+                <div class="hardFilterTitle">🚧 硬过滤（最优先级，命中直接跳过）</div>
+                <div class="grid2">
+                  <div>
+                    <div class="label">年龄区间</div>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      <input id="minAge" class="input" style="width: 100%;" type="number" min="0" max="70" step="1" placeholder="最小" />
+                      <input id="maxAge" class="input" style="width: 100%;" type="number" min="0" max="70" step="1" placeholder="最大" />
+                    </div>
+                  </div>
+                  <div>
+                    <div class="label">学历 / 院校</div>
+                    <select id="minEdu" class="input">
+                      <option value="0">不限</option>
+                      <option value="3">大专及以上</option>
+                      <option value="4">本科及以上</option>
+                      <option value="5">硕士及以上</option>
+                      <option value="6">博士</option>
+                      <option value="985">985 院校</option>
+                      <option value="211">211 院校</option>
+                      <option value="art">八大美院（含中传、北电）</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="grid2" style="margin-top:6px;">
+                  <div>
+                    <div class="label" title="今天 - 最新一份工作结束日期 > N 月直接淘汰">最近 Gap（月）</div>
+                    <input id="maxRecentGapMonths" class="input" type="number" min="0" max="240" step="1" placeholder="0 = 不启用" />
+                  </div>
+                  <div></div>
+                </div>
+                <div class="help" style="margin-top:4px;">0 / 不限 = 不启用</div>
+              </div>
+
+              <!-- 关键词操作按钮，放在末尾 -->
+              <div class="row keywordActions">
+                <button id="btnSaveJobCalib" class="btn ghost small" title="把当前关键词 + 硬过滤按岗位保存，切走再切回来还在">💾 保存本岗位校准</button>
+              </div>
+            </div>
+          </details>
+
+            </div>
+          </details>
+        </section>
+
+        <section class="card" style="padding: 0;">
+          <details class="collapseSec collapseOuter" data-key="recommendList" style="margin: 0; border: 0; background: transparent;">
+            <summary>
+              <span class="secTitle">推荐牛人列表</span>
+              <span class="secHint" id="recommendListHint">推荐</span>
+            </summary>
+            <div class="collapseBody">
+              <div class="segmented" id="outreachListModeGroup">
+                <button id="outreachListModeRecommend" class="segBtn" type="button" data-value="recommend">推荐</button>
+                <button id="outreachListModeFeatured" class="segBtn" type="button" data-value="featured">精选</button>
+                <button id="outreachListModeLatest" class="segBtn" type="button" data-value="latest">最新</button>
+              </div>
+              <div class="help">从哪个子列表读取候选人。默认走「推荐」最稳；「精选」「最新」按 Boss 页面同名 Tab 切换。</div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <div id="pageReply">
+        <div class="pageIntro">
+          <span class="piDot"></span>
+          <span class="piTitle">自动回复</span>
+          <span class="piSub">沟通页未读会话 · 通过 / 拒绝模板</span>
+          <span class="piLine"></span>
+        </div>
+        <!-- 1.1.x：当前运行模式提示（与主动寻访共享 settings.riskMode，只读，切换去本机点击器面板） -->
+        <section class="card replyRunModeBar">
+          <span class="replyRunModeIcon">⚙</span>
+          <span class="replyRunModeLabel">当前运行模式</span>
+          <span id="replyRunModeBadge" class="replyRunModeBadge">🛡 低风险</span>
+          <span class="replyRunModeHint">切换 → 主动寻访 → 进阶运行设置 → 本机点击器</span>
+        </section>
+
+        <section class="card" style="padding: 0;">
+          <details class="collapseSec collapseOuter" data-key="autoReplyScope" open style="margin: 0; border: 0; background: transparent;">
+            <summary>
+              <span class="secTitle">自动回复岗位范围</span>
+              <span class="secHint" id="autoReplyScopeHint">岗位 / 模板 / 常用语 / 冷却</span>
+              <button id="btnSaveReply" class="btn primary small save" title="保存自动回复设置；下一位会按新配置执行" style="margin-left: 8px;" onclick="event.stopPropagation()">保存自动回复</button>
+            </summary>
+            <div class="collapseBody">
+          <select id="autoReplyJobSelect" class="input"></select>
+          <div class="help">可选「全部职位」或指定岗位（仅在该岗位筛选下处理未读会话）。</div>
+
+          <div class="label" style="margin-top: 10px;">匹配通过分值（0-100）</div>
+          <input id="replyPassScore" class="input" type="number" min="0" max="100" step="1" />
+
+          <div class="row" style="margin-top: 10px;">
+            <button id="btnRefreshCommonPhrases" class="btn ghost small" title="从 Boss 沟通页读取常用语列表（需要你已打开沟通页）">刷新常用语</button>
+          </div>
+
+          <div class="label" style="margin-top: 10px;">简历通过后的回复</div>
+          <select id="autoReplyPassMode" class="input">
+            <option value="template">发送模板</option>
+            <option value="commonPhrase">发送 Boss 常用语</option>
+            <option value="none">不发送，直接求简历</option>
+          </select>
+          <div id="autoReplyPassCommonPhraseWrap">
+            <div class="label" style="margin-top: 8px;">Boss 常用语</div>
+            <select id="autoReplyPassCommonPhrase" class="input"></select>
+            <div class="label" style="margin-top: 8px;">需作品时专用常用语（可选）</div>
+            <select id="autoReplyPassPortfolioCommonPhrase" class="input"></select>
+          </div>
+          <div id="autoReplyPassTemplateWrap">
+            <div class="label" style="margin-top: 8px;">模板（变量：${name} ${position} ${reason}）</div>
+            <textarea id="autoReplyPassTemplate" class="textarea" rows="4"></textarea>
+          </div>
+
+          <div class="label" style="margin-top: 14px;">对方拒绝我们的回复</div>
+          <select id="autoReplyCandidateRejectMode" class="input">
+            <option value="template">发送模板</option>
+            <option value="commonPhrase">发送 Boss 常用语</option>
+            <option value="none">不发送</option>
+          </select>
+          <div id="autoReplyCandidateRejectCommonPhraseWrap">
+            <div class="label" style="margin-top: 8px;">Boss 常用语</div>
+            <select id="autoReplyCandidateRejectCommonPhrase" class="input"></select>
+          </div>
+          <div id="autoReplyCandidateRejectTemplateWrap">
+            <div class="label" style="margin-top: 8px;">模板（变量：${name} ${position} ${reason}）</div>
+            <textarea id="autoReplyCandidateRejectTemplate" class="textarea" rows="3"></textarea>
+          </div>
+
+          <div class="label" style="margin-top: 14px;">我们拒绝对方的回复</div>
+          <select id="autoReplyOurRejectMode" class="input">
+            <option value="template">发送模板</option>
+            <option value="commonPhrase">发送 Boss 常用语</option>
+            <option value="none">不发送</option>
+          </select>
+          <div id="autoReplyOurRejectCommonPhraseWrap">
+            <div class="label" style="margin-top: 8px;">Boss 常用语</div>
+            <select id="autoReplyOurRejectCommonPhrase" class="input"></select>
+          </div>
+          <div id="autoReplyOurRejectTemplateWrap">
+            <div class="label" style="margin-top: 8px;">模板（变量：${name} ${position} ${reason}）</div>
+            <textarea id="autoReplyOurRejectTemplate" class="textarea" rows="3"></textarea>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <label class="switch" id="autoReplyClickNotFitLabel">
+              <input id="autoReplyClickNotFit" type="checkbox" />
+              <span>自动回复判定不匹配时点“不合适”按钮</span>
+            </label>
+            <span id="autoReplyClickNotFitHint" class="hint" style="margin-left:8px;color:#9ca3af;display:none;">仅 ⚡半自动 / ⚠️全自动 模式生效</span>
+          </div>
+
+          <div class="label">自动回复冷却（分钟）</div>
+          <input id="replyCooldownMin" class="input" type="number" min="1" max="1440" step="1" />
+            </div>
+          </details>
+        </section>
+
+        <section class="card">
+          <div class="row">
+            <div class="label" style="margin-bottom: 0;">待人工处理汇总</div>
+            <button id="btnClearManualQueue" class="btn ghost small" title="清空本地待处理汇总">清空汇总</button>
+          </div>
+          <div id="manualReviewSummary" class="manualSummaryList">
+            <div class="manualSummaryEmpty">当前没有待人工处理项</div>
+          </div>
+        </section>
+
+      </div>
+
+      <div id="pageHistory" style="display:none;">
+        <div class="pageIntro">
+          <span class="piDot"></span>
+          <span class="piTitle">历史 / 统计</span>
+          <span class="piSub">本地评分记录 · 仅本机可见</span>
+          <span class="piLine"></span>
+        </div>
+        <section class="card">
+          <div class="row">
+            <div class="label" style="margin-bottom: 0;">运行统计</div>
+            <div style="display:flex; gap:6px;">
+              <button id="btnHistoryRefresh" class="btn ghost small" title="重新读取本地历史">刷新</button>
+              <button id="btnHistoryExportCSV" class="btn primary small" title="导出全部历史为 CSV">导出 CSV</button>
+              <button id="btnHistoryClear" class="btn ghost small" title="清空本地评分历史（仅清记录，不影响 Boss）">清空</button>
+            </div>
+          </div>
+          <div class="help">仅本机可见，不上传任何数据。</div>
+
+          <div id="historyStats" class="historyStatsGrid">
+            <div class="hsItem"><div class="hsLabel">总记录</div><div id="hsTotal" class="hsVal">0</div></div>
+            <div class="hsItem"><div class="hsLabel">今日</div><div id="hsToday" class="hsVal">0</div></div>
+            <div class="hsItem"><div class="hsLabel">通过率</div><div id="hsPassRate" class="hsVal">-</div></div>
+            <div class="hsItem"><div class="hsLabel">平均分</div><div id="hsAvgScore" class="hsVal">-</div></div>
+            <div class="hsItem"><div class="hsLabel">待人工</div><div id="hsPending" class="hsVal">0</div></div>
+            <div class="hsItem"><div class="hsLabel">硬过滤淘汰</div><div id="hsHardFiltered" class="hsVal">0</div></div>
+          </div>
+
+          <div class="row" style="margin-top: 10px;">
+            <div class="label" style="margin-bottom: 0;">筛选</div>
+            <select id="historyFilter" class="input" style="max-width: 130px;">
+              <option value="all">全部状态</option>
+              <option value="passed">仅通过</option>
+              <option value="failed">仅未通过</option>
+              <option value="manual">仅待人工</option>
+            </select>
+            <select id="historyDateRange" class="input" style="max-width: 130px;" title="按写入时间筛选（同时影响下方列表与导出的 CSV）">
+              <option value="today">今日</option>
+              <option value="7d">近 7 天</option>
+              <option value="30d" selected>近 30 天</option>
+              <option value="all">全部</option>
+            </select>
+            <input id="historySearch" class="input" placeholder="姓名/原因关键词" style="flex:1; min-width:120px;" />
+          </div>
+          <div class="help" style="margin-top: 4px;">本地最多保留近 30 天的评分记录，更早的会在下次运行时自动清理。导出 CSV 会按当前的「日期范围」+「状态」+「关键词」一并过滤。</div>
+
+          <div id="historyList" class="historyList">
+            <div class="historyEmpty">暂无评分记录</div>
+          </div>
+        </section>
+      </div>
+
+      <section class="actions">
+        <button id="btnStart" class="btn primary">开始</button>
+        <button id="btnStop" class="btn">停止</button>
+        <button id="btnClearLogs" class="btn ghost">清空日志</button>
+      </section>
+
+
+      <section class="card log">
+        <div class="row" style="flex-wrap: wrap; gap: 6px;">
+          <div class="label" style="margin-bottom: 0;">📋 运行日志 <span id="runResultsCount" class="runResultsCount">0</span></div>
+          <div id="runState" class="pill">未运行</div>
+          <button id="btnClearRunResults" class="btn ghost small" title="只清当前页面卡片显示，不影响历史/统计页全部记录">清空显示</button>
+          <div style="flex: 1 1 100%; display:flex; gap:6px; align-items:center; margin-top: 4px;">
+            <select id="logLevelFilter" class="input" style="height:28px; padding:0 6px; max-width:90px; margin-bottom:0;">
+              <option value="all">全部</option>
+              <option value="info">信息</option>
+              <option value="success">成功</option>
+              <option value="warn">警告</option>
+              <option value="error">错误</option>
+            </select>
+            <input id="logSearch" class="input" placeholder="搜索…" style="height:28px; padding:0 8px; flex:1; margin-bottom:0;" />
+            <label class="switch" title="新内容到达时自动滚到底部" style="font-size: 11px; gap:4px;">
+              <input id="logAutoScroll" type="checkbox" checked />
+              <span>自动滚动</span>
+            </label>
+          </div>
+        </div>
+        <div id="logBox" class="logBox"></div>
+      </section>
+    </div>
+
+    <!-- 1.1.x：右下角水印 -->
+    <div class="jadeWatermark" title="🎨 made with love by Jade">design by Jade ♡</div>
+    <script src="./popup.js"></script>
+  </body>
+</html>
