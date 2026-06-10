@@ -1127,15 +1127,27 @@ function bindEvents() {
       appendLogLine({ ts: Date.now(), level: 'warn', message: '请先选择一个岗位，再保存本岗位校准' });
       return;
     }
+    // 1.2.x：完整保存"本岗位校准"= 关键词四件套 + 硬过滤四件套（年龄/学历/Gap）
+    // 之前只传了关键词，没传硬过滤；upsertJobKeywordOverride 老逻辑会把没传的硬过滤字段
+    // 默默重置为 0/'0'，导致用户刚填的年龄学历存完就消失。现在显式全量传齐。
     await upsertJobKeywordOverride(key, {
       requiredKeywords: els.requiredKeywords?.value || '',
       includeKeywords: els.includeKeywords.value,
       excludeKeywords: els.excludeKeywords.value,
       aiNiceKeywords: els.aiNiceKeywords?.value || '',
+      minAge: els.minAge?.value,
+      maxAge: els.maxAge?.value,
+      minEdu: els.minEdu?.value,
+      maxRecentGapMonths: els.maxRecentGapMonths?.value,
     });
+    // 1.2.x：把当前 JD 也持久化到 jobs[].jdText，下次切回该岗位不再触发自动重抓
+    const jdNow = String(els.jdText?.value || '').trim();
+    if (jdNow) {
+      try { await persistJdToJobsCache(key, jdNow); } catch {}
+    }
     // 同步写入 settings（让当前运行也立刻生效）
     await saveSettings();
-    appendLogLine({ ts: Date.now(), level: 'success', message: '已保存：本岗位校准（下次切回不会自动变动；除非点“AI生成关键词”）' });
+    appendLogLine({ ts: Date.now(), level: 'success', message: '已保存：本岗位校准（关键词 + 硬过滤 + JD）' });
   });
 
   els.btnAiGenKeywords?.addEventListener('click', async () => {
@@ -1331,22 +1343,24 @@ function getEffectiveJobKeywordOverride(jobKey, jobName = '') {
 async function upsertJobKeywordOverride(jobKey, override) {
   const key = String(jobKey || '').trim();
   if (!key) return;
-  const next = {
-    ...jobKeywordOverrides,
-    [key]: {
-      ...(jobKeywordOverrides?.[key] || {}),
-      requiredKeywords: String(override?.requiredKeywords || ''),
-      includeKeywords: String(override?.includeKeywords || ''),
-      excludeKeywords: String(override?.excludeKeywords || ''),
-      keywordsAndMode: !!override?.keywordsAndMode,
-      aiNiceKeywords: String(override?.aiNiceKeywords || ''),
-      minAge: clampInt(override?.minAge, 0, 70, 0),
-      maxAge: clampInt(override?.maxAge, 0, 70, 0),
-      minEdu: normalizeEduRequirementValue(override?.minEdu),
-      maxRecentGapMonths: clampInt(override?.maxRecentGapMonths, 0, 240, 0),
-      updatedAt: Date.now(),
-    },
-  };
+  const prev = jobKeywordOverrides?.[key] || {};
+  // 1.2.x：真正的"局部更新" —— 调用方没传的字段保留原值，绝不默默清零
+  // 之前的 bug：override?.minAge 是 undefined 时，clampInt(undefined,...,0) 返回 0，
+  //   把用户刚填好的年龄 / 学历 / Gap 重置成 0；
+  //   再叠加 persistJdToJobsCache 触发 storage 更新 → renderJobsSelect →
+  //   applySelectedJobScopedFiltersToUI 用清零后的值覆写表单，可视化为"年龄过滤消失"。
+  const merged = { ...prev };
+  if (override?.requiredKeywords !== undefined)    merged.requiredKeywords    = String(override.requiredKeywords || '');
+  if (override?.includeKeywords !== undefined)     merged.includeKeywords     = String(override.includeKeywords || '');
+  if (override?.excludeKeywords !== undefined)     merged.excludeKeywords     = String(override.excludeKeywords || '');
+  if (override?.keywordsAndMode !== undefined)     merged.keywordsAndMode     = !!override.keywordsAndMode;
+  if (override?.aiNiceKeywords !== undefined)      merged.aiNiceKeywords      = String(override.aiNiceKeywords || '');
+  if (override?.minAge !== undefined)              merged.minAge              = clampInt(override.minAge, 0, 70, 0);
+  if (override?.maxAge !== undefined)              merged.maxAge              = clampInt(override.maxAge, 0, 70, 0);
+  if (override?.minEdu !== undefined)              merged.minEdu              = normalizeEduRequirementValue(override.minEdu);
+  if (override?.maxRecentGapMonths !== undefined)  merged.maxRecentGapMonths  = clampInt(override.maxRecentGapMonths, 0, 240, 0);
+  merged.updatedAt = Date.now();
+  const next = { ...jobKeywordOverrides, [key]: merged };
   jobKeywordOverrides = next;
   await chrome.storage.local.set({ [STORAGE_KEYS.jobKeywordOverrides]: next });
 }
@@ -1664,10 +1678,11 @@ function renderJobsSelect() {
   }
 
   const values = Array.from(map.values()).map(normalizeStoredJobStateForPopup);
-  // 正常口径：优先只展示“职位管理页开放中列表”里的岗位。
-  // 兜底：如果刷新后状态暂时没同步回来，不要把下拉直接渲染空。
-  const openList = values.filter((j) => j?.isOpen === true);
-  const list = openList.length > 0 ? openList : values.filter((j) => j?.isOpen !== false);
+  // 1.2.x：严格过滤 —— 只显示职位管理页"发布中"的岗位（isOpen === true）。
+  // 已关闭 / 已暂停 / 已下线（isOpen === false）→ 直接删除不展示。
+  // 状态未同步（isOpen === null，例如还没打开过职位管理页）→ 也不展示，避免误导。
+  // 用户体验：如果下拉是空的，说明要先去 Boss 左侧「职位管理」打开一次让插件读到岗位列表。
+  const list = values.filter((j) => j?.isOpen === true);
   // 有 JD 的排前面，其次最近更新
   list.sort((a, b) => {
     const aj = a?.jdText && String(a.jdText).trim().length > 0 ? 1 : 0;
@@ -1676,30 +1691,24 @@ function renderJobsSelect() {
     return (b?.updatedAt || 0) - (a?.updatedAt || 0);
   });
 
-  if (current) {
-    const selected = values.find((j) => j?.key === current);
-    if (selected && !list.some((j) => j?.key === current)) {
-      const labelBase = selected.name || settings.positionName || '当前岗位';
-      opts.push(`<option value="${escapeAttr(selected.key)}">${escapeHtml(`${labelBase}（当前已选）`)}</option>`);
-    }
-  }
+  // 1.2.x：之前的"当前已选但已关闭"保留条目已移除 —— 关闭/删除的岗位不再"以已选名义"留在下拉
 
   for (const j of list) {
     const hasJd = j.jdText && String(j.jdText).trim().length > 0;
     const hasCalib = !!(jobKeywordOverrides && jobKeywordOverrides[j.key]);
-    const statusSuffix = j?.isOpen === true ? '' : '（状态待同步）';
     // 1.1.1：把 [JD] [校准] 徽标贴到岗位名上，让用户切岗位时一眼判断
     const badges = [];
     if (hasJd) badges.push('JD');
     if (hasCalib) badges.push('校准');
     const badgeStr = badges.length ? ` [${badges.join('·')}]` : '';
     const noJdSuffix = hasJd ? '' : '（未同步JD）';
-    const label = `${j.name}${badgeStr}${noJdSuffix}${statusSuffix}`;
+    const label = `${j.name}${badgeStr}${noJdSuffix}`;
     opts.push(`<option value="${escapeAttr(j.key)}">${escapeHtml(label)}</option>`);
   }
   if (hasOutreachSelect) {
     els.jobSelect.innerHTML = opts.join('');
-    const canKeep = current && (list.some((j) => j.key === current) || values.some((j) => j.key === current));
+    // 1.2.x：当前选中的岗位若已不在发布中 → 自动清空选择
+    const canKeep = current && list.some((j) => j.key === current);
     els.jobSelect.value = canKeep ? current : '';
   }
   // 1.1.x：basicCard 顶部"正在筛选"高亮 —— 显示当前选中岗位名
@@ -1708,22 +1717,42 @@ function renderJobsSelect() {
   if (hasReplySelect) {
     const replyOpts = [];
     replyOpts.push(`<option value="">全部职位</option>`);
-    if (currentReply) {
-      const selected = values.find((j) => j?.key === currentReply);
-      if (selected && !list.some((j) => j?.key === currentReply)) {
-        replyOpts.push(`<option value="${escapeAttr(selected.key)}">${escapeHtml(`${selected.name || '当前岗位'}（当前已选）`)}</option>`);
-      }
-    }
     for (const j of list) {
       replyOpts.push(`<option value="${escapeAttr(j.key)}">${escapeHtml(j.name || '')}</option>`);
     }
     els.autoReplyJobSelect.innerHTML = replyOpts.join('');
-    const canKeepReply = currentReply && (list.some((j) => j.key === currentReply) || values.some((j) => j.key === currentReply));
+    // 1.2.x：自动回复岗位选中已不在发布中 → 自动回退到"全部职位"
+    const canKeepReply = currentReply && list.some((j) => j.key === currentReply);
     els.autoReplyJobSelect.value = canKeepReply ? currentReply : '';
   }
   applySelectedJobScopedFiltersToUI();
   // 1.2.x：折叠区收起时也能在 summary 看到当前岗位范围
   updateAutoReplyScopeHint();
+}
+
+// 1.2.x：把当前 textarea 的 JD 持久化到 jobs[].jdText（按 key 匹配的那条记录）
+//   - 解决：保存岗位校准 / 切回岗位时 JD 丢失，每次都需要手动点"刷新 JD"
+//   - 写完会触发 chrome.storage.onChanged → 自动 reload 本地 jobs 数组 + 重渲下拉
+async function persistJdToJobsCache(key, jdText) {
+  if (!key || !jdText) return;
+  const k = String(key).trim();
+  const v = String(jdText).trim();
+  if (!k || !v) return;
+  try {
+    const r = await chrome.storage.local.get([STORAGE_KEYS.jobs]);
+    const arr = Array.isArray(r?.[STORAGE_KEYS.jobs]) ? r[STORAGE_KEYS.jobs] : [];
+    const idx = arr.findIndex((j) => j && String(j.key || '').trim() === k);
+    const now = Date.now();
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], jdText: v, updatedAt: now };
+    } else {
+      // 走到这里说明该 key 在缓存里没有，但用户还是选中并保存了 —— 兜底也写一条
+      arr.push({ key: k, name: getSelectedJobName() || '', jdText: v, updatedAt: now });
+    }
+    await chrome.storage.local.set({ [STORAGE_KEYS.jobs]: arr });
+  } catch (e) {
+    appendLogLine({ ts: Date.now(), level: 'warn', message: `持久化 JD 失败：${e?.message || e}` });
+  }
 }
 
 // 1.2.x：自动回复岗位范围折叠区的 summary hint —— 显示当前选中的岗位

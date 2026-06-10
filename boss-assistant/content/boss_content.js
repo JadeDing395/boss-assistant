@@ -7307,10 +7307,46 @@ if (window.__bossAssistLoaded__ && window.__bossAssistVersion__ === __BOSS_ASSIS
     function scoreResumeText(t) {
       const s = String(t || '');
       let score = 0;
-      score += Math.min(200, s.length / 30);
-      const keys = ['工作经历', '教育经历', '期望职位', '专业技能', '关键词', '自我评价', '个人评价'];
-      for (const k of keys) if (s.includes(k)) score += 20;
+      // 1.2.x：长度权重降权（原来 max 200 → 现在 max 80），让"关键词命中"成为主导信号
+      score += Math.min(80, s.length / 50);
+      const keys = [
+        '工作经历', '教育经历', '工作经验', '教育经验', '期望职位', '期望薪资',
+        '专业技能', '项目经验', '个人简介', '自我评价', '个人评价',
+        '所属公司', '在职时间', '毕业院校', '所学专业', '求职状态',
+      ];
+      for (const k of keys) if (s.includes(k)) score += 30;
       return score;
+    }
+
+    // 1.2.x：硬性闸门 —— 文本是否像"真简历"。防止网页脚本代码 / JSON / 空容器被误当简历送进 AI
+    // 触发本闸门只看内容形态，不看 DOM 来源；通过即视为"可送 AI"，否则继续找下一候选
+    function looksLikeResume(text) {
+      const s = String(text || '');
+      if (s.length < 80) return false;
+
+      // 必须包含至少一个典型简历关键词
+      const resumeKeys = [
+        '工作经历', '教育经历', '工作经验', '教育经验', '项目经验',
+        '期望职位', '期望薪资', '求职状态', '专业技能', '个人简介', '自我评价',
+        '所属公司', '在职时间', '毕业院校', '所学专业',
+        '本科', '硕士', '博士', '大专',
+      ];
+      const hasResumeKey = resumeKeys.some((k) => s.includes(k));
+      if (!hasResumeKey) return false;
+
+      // 反指标 1：JS 代码标记 —— `function` / `var` / `=>` / `return ` 等高频出现 = 多半是脚本
+      const jsMarkers = (s.match(/\bfunction\b|\bvar\b|\blet\b|\bconst\b|=>|\breturn\s|\bif\s*\(|\bfor\s*\(/g) || []).length;
+      if (jsMarkers > 15) return false;
+
+      // 反指标 2：大括号/分号密度过高（代码 / JSON 特征）
+      const codeChars = (s.match(/[{};=]/g) || []).length;
+      if (codeChars > s.length / 10) return false;
+
+      // 反指标 3：中文字符比例太低（简历应大量中文）
+      const cjk = (s.match(/[一-龥]/g) || []).length;
+      if (cjk < Math.max(40, s.length * 0.12)) return false;
+
+      return true;
     }
 
     function pickResumeTextFromFrameDocs() {
@@ -7333,6 +7369,8 @@ if (window.__bossAssistLoaded__ && window.__bossAssistVersion__ === __BOSS_ASSIS
             const pruned = pruneSimilarGeekSectionFromElement(root);
             const t = stripIrrelevantSections(normalize(pruned.innerText || pruned.textContent || ''));
             if (!t || t.length < 40) continue;
+            // 1.2.x：硬性闸门 —— 不像简历就跳过，防止脚本代码 / JSON 污染
+            if (!looksLikeResume(t)) continue;
             let score = scoreResumeText(t) + 260;
             if (frameEl?.closest?.('.dialog-wrap.active, .boss-dialog__wrapper, .boss-dialog, .dialog-lib-resume')) {
               score += 80;
@@ -7369,6 +7407,8 @@ if (window.__bossAssistLoaded__ && window.__bossAssistVersion__ === __BOSS_ASSIS
             const pruned = pruneSimilarGeekSectionFromElement(el);
             const t = stripIrrelevantSections(normalize(pruned.innerText || pruned.textContent || ''));
             if (!t) continue;
+            // 1.2.x：硬性闸门 —— 不像简历就跳过
+            if (!looksLikeResume(t)) continue;
             candidates.push({ el, t, score: scoreResumeText(t) });
           }
         }
@@ -7611,6 +7651,25 @@ if (window.__bossAssistLoaded__ && window.__bossAssistVersion__ === __BOSS_ASSIS
       logInfo('简历正文：未命中主简历正文，已退回右侧摘要兜底');
       return rememberMeta('rightbar', rightbarPicked, 'fallback');
     }
+
+    // 1.2.x：所有渠道都没拿到"像简历的内容"。诊断日志：是真的没简历，还是被闸门拦了
+    try {
+      let rawCandidate = '';
+      for (const d of getDocs()) {
+        for (const sel of ['.resume-detail.resume-detail-chat', '.resume-content-wrap', '.resume-detail-wrap', '[class*="resume-detail"]']) {
+          const el = d.querySelector?.(sel);
+          if (el && isVisible(el)) {
+            const raw = normalize(el.innerText || el.textContent || '').slice(0, 200);
+            if (raw && !rawCandidate) rawCandidate = raw;
+          }
+        }
+      }
+      if (rawCandidate) {
+        logWarn(`简历正文：找到候选 DOM 但未通过"像简历"硬闸门（前 200 字：${rawCandidate.replace(/\s+/g, ' ')}...）`);
+      } else {
+        logWarn('简历正文：未在页面找到任何简历容器（可能简历面板未加载完成 / 候选人未公开简历）');
+      }
+    } catch {}
 
     return rememberMeta('empty', '', 'no-resume-text');
   }
